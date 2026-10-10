@@ -122,6 +122,20 @@ add_library(qjs_engine STATIC
     ${LEXBOR_SRC}
 )
 
+# ---- MinGW 构建下 wasm3 源文件不参与 LTO ----
+# wasm3 的错误码是 const char* 指针变量（m3Err_*），跨翻译单元依赖指针同一性
+# 比较（如 m3_api_libc.c 的 SuppressLookupFailure：i_result == m3Err_functionLookupFailed）。
+# ELF 平台（Android/Linux）的 .rodata mergeable section 保证相同字符串字面量地址
+# 唯一；PE/COFF（MinGW）没有该语义，gcc LTO 常量传播会在返回点物化新的字符串
+# 副本 —— 与 m3_core.c 中初始化 m3Err_* 的字面量地址不同，指针比较恒 false，
+# LinkLibC 的 lookup-failure 抑制失效，WebAssembly.Instance 构造抛
+# "function lookup failed"（2026-10-10 Windows dll 实锤：双地址 0x…795C vs 0x…4590）。
+# wasm3 全部 TU 退出 LTO 后恢复按符号读取真实变量，比较可靠。
+# Android（clang thin LTO + ELF）不受影响，此条件不触发。
+if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    set_source_files_properties(${WASM3_SRC} PROPERTIES COMPILE_OPTIONS "-fno-lto")
+endif()
+
 # ---- 性能优化：LTO + O2（Release 默认开启，可用 QJS_ENABLE_LTO=OFF 关闭） ----
 option(QJS_ENABLE_LTO "Enable Link Time Optimization (Release)" ON)
 include(CheckIPOSupported)
